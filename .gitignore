@@ -1,0 +1,21 @@
+.env
+.env.*
+!.env.example
+
+node_modules/
+.npm-cache/
+*.log
+*.tgz
+
+# Never publish live payment material or paid responses.
+data/
+output/
+receipts/
+responses/
+recovery/
+notes/
+run-logs/
+
+px402-spike/node_modules/
+px402-spike/notes/
+px402-spike/.env

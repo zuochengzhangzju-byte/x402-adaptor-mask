@@ -1,0 +1,8 @@
+{
+  "assets": ["ETH", "BTC", "BASE"],
+  "horizon": "24h",
+  "intent": "research_only",
+  "strategy": "event-driven crypto market research",
+  "include": ["trend", "sentiment", "technical", "fundamental", "risk"],
+  "context": "Evaluate whether ETH and Base ecosystem catalysts justify further research. Do not execute trades."
+}

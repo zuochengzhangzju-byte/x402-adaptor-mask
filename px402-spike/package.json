@@ -1,0 +1,22 @@
+{
+  "name": "px402-spike",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node ./no-funds-check.mjs",
+    "dry-run:weather": "node ./dry-run-weather.mjs",
+    "maturity:check": "node ./maturity-check.mjs",
+    "wallet:check": "node ./check-wallet.mjs",
+    "deposit:min": "node ./deposit-minimum.mjs",
+    "call:weather": "node ./call-private-weather.mjs",
+    "0x:gasless:quote": "node ./zerox-gasless-quote.mjs"
+  },
+  "dependencies": {
+    "@prxvt/sdk": "^1.0.2",
+    "dotenv": "^16.4.7",
+    "snarkjs": "^0.7.6",
+    "undici": "^8.4.0",
+    "viem": "^2.52.2"
+  }
+}
