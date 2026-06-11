@@ -13,6 +13,10 @@ px402 note, while keeping durable payment material, receipts, responses, and rec
 It is not a production privacy wallet and does not hide prompts, IP metadata, provider-side account
 metadata, or future trading activity.
 
+The adapter boundary is intended to be pluggable. PRXVT is the first tested rail; the same x402
+policy, budget, receipt, and recovery interface can later be connected to other shielded-payment
+rails.
+
 ## What Is Included
 
 - `bin/privacy-adapter.js` - CLI wrapper for Base USDC x402 calls through a private-note flow.

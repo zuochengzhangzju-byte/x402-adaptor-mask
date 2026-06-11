@@ -4,16 +4,31 @@
 
 This project is a hackathon privacy-payment adapter, not a production privacy wallet.
 
-The intended claim is narrow:
+The hackathon goal is transaction-linkability reduction for x402 paid tool calls:
 
 ```text
-Separate the research-payment note/burner path from future trading wallets.
-Enforce provider allowlists and small spend budgets.
-Keep local note/recovery material encrypted.
+agent -> x402 adapter -> pluggable privacy rail -> paid tool
 ```
 
-It does not currently prove prompt privacy, IP privacy, provider-account privacy, or production-grade
-ZK circuit integrity.
+The current implementation uses PRXVT as the first privacy rail and keeps the adapter boundary
+intentionally narrow so other rails, such as Curvy-style or future shielded pools, can be swapped in.
+Security findings below are about this implementation and deployment setting, not a claim that the
+adapter pattern itself is limited to PRXVT.
+
+What this review does not prove:
+
+```text
+prompt privacy
+response/content privacy
+IP privacy
+provider-account privacy
+production-grade ZK circuit integrity
+transaction unlinkability under a low-activity upstream pool
+```
+
+Local notes, recovery files, receipts, and paid responses are still treated as sensitive local
+artifacts, but "not recovered by this red-team run" should not be read as a proof of content
+privacy.
 
 ## Findings And Mitigations
 
