@@ -72,9 +72,21 @@ Spend controls:
 ```env
 MAX_USD_PER_CALL=0.02
 MONTHLY_BUDGET_USD=20
+MIN_NOTE_AGE_MINUTES=60
+AUTO_PREPARE_BEFORE_PAYMENT=false
+BURNER_FUNDING_BUCKET_USD=0
 MIN_BASE_ETH_BUFFER=0.00005
 ZEROX_DUST_USDC=0.1
 ```
+
+Privacy timing controls:
+
+- `MIN_NOTE_AGE_MINUTES=60` means real paid calls refuse fresh notes until the wait window passes.
+- `AUTO_PREPARE_BEFORE_PAYMENT=false` means `market`, `nansen`, and `smoke:weather` do not deposit
+  immediately before paying.
+- `BURNER_FUNDING_BUCKET_USD=0` keeps exact burner funding. Set a fixed bucket such as `0.1` to
+  reduce amount correlation between the pool unshield and provider price. The unused remainder
+  stays on the burner unless recovered through the sign-only recovery path.
 
 The wallet should hold a small amount of Base USDC. If it has too little native Base ETH, the CLI
 can use 0x Gasless to buy dust ETH with USDC.
@@ -111,6 +123,7 @@ npm run privacy -- prepare
 ```
 
 Ensures enough dust ETH and creates or tops up the encrypted px402 note.
+For privacy, run this ahead of the paid call and wait until the returned `privacyReadyAt` time.
 
 ```text
 npm run demo:market -- --dry-run --symbol ETH --query "Ethereum market structure and Base ecosystem catalyst"
@@ -125,12 +138,17 @@ npm run demo:market -- --symbol ETH --query "Ethereum market structure and Base 
 Runs the tiny real-funds demo:
 
 ```text
-prepare if needed
+preprepared privacy-ready note
   -> private CMC x402 call
   -> private Exa x402 call
   -> local signal JSON
   -> receipts
 ```
+
+By default this command does not deposit immediately before paying. If the note is missing,
+underfunded, or too fresh, it fails with instructions to run `prepare` first. Use
+`--auto-prepare --allow-fresh-note` only for unsafe demos where timing privacy is intentionally out
+of scope.
 
 Confirmed headline command today:
 
@@ -217,6 +235,10 @@ only a failure-recovery path and should be treated as sensitive local data.
   payload but Exa's facilitator rejected it.
 - Failed provider retries create encrypted recovery files before the paid retry is attempted. Two
   failed burner balances were swept back successfully during validation.
+- After the red-team timing-correlation review, real paid calls no longer auto-prepare by default
+  and now enforce `MIN_NOTE_AGE_MINUTES` unless `--allow-fresh-note` is explicitly passed.
+- Optional `BURNER_FUNDING_BUCKET_USD` normalizes the pool-to-burner unshield amount. This improves
+  amount unlinkability but leaves public residual USDC on the burner.
 
 ## Review Checklist
 
@@ -228,6 +250,10 @@ only a failure-recovery path and should be treated as sensitive local data.
 - `recover:sweep` without `--execute` must not sign or spend.
 - `recover:sweep --sign-only --destination ...` signs an EIP-3009 authorization but must not
   broadcast.
+- `market`, `nansen`, and `smoke:weather` must not auto-deposit before payment unless
+  `--auto-prepare` or `AUTO_PREPARE_BEFORE_PAYMENT=true` is set.
+- Real paid calls must reject fresh notes unless `--allow-fresh-note` or `MIN_NOTE_AGE_MINUTES=0`
+  is set.
 - Real-spend paths are `prepare`, `market`, and `smoke:weather` without `--dry-run`.
 - `recover:sweep --execute --allow-linking-sweep` is unsafe: it signs a recovery authorization,
   broadcasts from the disposable wallet, and creates an onchain link between the hot wallet and the

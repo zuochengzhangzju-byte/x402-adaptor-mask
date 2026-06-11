@@ -153,6 +153,52 @@ Safe recovery requires broadcasting the signed authorization from an unlinkable 
 wallet and sending funds to a destination that is not the configured research hot wallet. The
 adapter cannot make recovery private if the user chooses a linked destination or linked broadcaster.
 
+### Immediate Deposit Then Payment In A Small Pool
+
+Finding:
+
+```text
+The red-team report showed a 0.1 USDC hot-wallet deposit followed by a 0.05 USDC unshield and
+provider payment about 2.5 minutes later. In the observed window, the pool had only one matching
+unshield, so the effective anonymity set was approximately 1.
+```
+
+Mitigation:
+
+```text
+Fixed in bin/privacy-adapter.js.
+market, nansen, and smoke:weather no longer auto-prepare by default.
+Real paid calls require an existing note that is older than MIN_NOTE_AGE_MINUTES, default 60.
+prepare writes privacyReadyAt into encrypted note metadata.
+--auto-prepare --allow-fresh-note exists only for unsafe demos.
+```
+
+This does not create anonymity if the upstream pool itself has little activity. It only prevents the
+adapter from creating the easiest "deposit immediately followed by payment" timing signature by
+default.
+
+### Exact Unshield Amount Equals Provider Price
+
+Finding:
+
+```text
+The pool-to-burner unshield amount matched the provider payment amount exactly. That exact amount is
+a strong correlation handle when the pool is quiet.
+```
+
+Mitigation:
+
+```text
+Fixed / configurable in bin/privacy-adapter.js.
+BURNER_FUNDING_BUCKET_USD can fund the burner with a fixed bucket, for example 0.1 USDC, while the
+provider still receives the exact x402 price.
+Receipts record burnerFundUsdc and burnerRemainderUsdc because note delta may intentionally differ
+from provider price.
+```
+
+This mitigation trades privacy for capital efficiency and residual burner balances. Residual
+balances should not be swept through the hot wallet; use the sign-only recovery path.
+
 ## Remaining Production Gaps
 
 ```text
@@ -162,5 +208,7 @@ No prompt/IP privacy.
 No provider-side identity unlinkability.
 No merchant payTo pinning; provider payTo can rotate within an allowlisted resource.
 Recovery privacy depends on an unlinkable relayer/gas wallet and unlinkable destination.
+Timing privacy still depends on real anonymity-set size in the upstream pool.
+Amount privacy requires a nonzero BURNER_FUNDING_BUCKET_USD and careful residual handling.
 No packaged one-command installer yet; `npm --prefix px402-spike install` is still required.
 ```

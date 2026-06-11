@@ -225,6 +225,9 @@ function localEnvTemplate(args = {}) {
     "",
     envLine("MAX_USD_PER_CALL", process.env.MAX_USD_PER_CALL || "0.02"),
     envLine("MONTHLY_BUDGET_USD", process.env.MONTHLY_BUDGET_USD || "20"),
+    envLine("MIN_NOTE_AGE_MINUTES", process.env.MIN_NOTE_AGE_MINUTES || "60"),
+    envLine("AUTO_PREPARE_BEFORE_PAYMENT", process.env.AUTO_PREPARE_BEFORE_PAYMENT || "false"),
+    envLine("BURNER_FUNDING_BUCKET_USD", process.env.BURNER_FUNDING_BUCKET_USD || "0"),
     envLine("MIN_BASE_ETH_BUFFER", process.env.MIN_BASE_ETH_BUFFER || "0.00005"),
     "",
     envLine("0X_API_KEY", process.env["0X_API_KEY"] || ""),
@@ -278,6 +281,7 @@ function publicNoteSummary(noteAction) {
       note: {
         file: noteAction.note.file,
         balance: noteAction.note.balance,
+        privacyReadyAt: noteAction.note.privacyReadyAt || null,
       },
     };
   }
@@ -340,6 +344,9 @@ function config(args = {}) {
     remoteCircuitsAck: process.env.PRXVT_REMOTE_CIRCUITS_ACK || "",
     maxUsdPerCall: numberEnv("MAX_USD_PER_CALL", 0.02),
     monthlyBudgetUsd: numberEnv("MONTHLY_BUDGET_USD", 20),
+    minNoteAgeMinutes: numberEnv("MIN_NOTE_AGE_MINUTES", 60),
+    autoPrepareBeforePayment: toBool(process.env.AUTO_PREPARE_BEFORE_PAYMENT),
+    burnerFundingBucketUsdc: numberEnv("BURNER_FUNDING_BUCKET_USD", 0),
     minBaseEthBuffer: process.env.MIN_BASE_ETH_BUFFER || "0.00005",
     zeroxApiKey: process.env.ZEROX_API_KEY || process.env["0X_API_KEY"],
     zeroxDustUsdc: numberEnv("ZEROX_DUST_USDC", 0.1),
@@ -403,7 +410,15 @@ async function readLatestNote(cfg) {
   const { decryptNote, getNoteBalance } = privacy();
   const stored = JSON.parse(fs.readFileSync(file, "utf8"));
   const note = await decryptNote(stored.encryptedNote, cfg.notePassword);
-  return { file, note, balance: getNoteBalance(note) };
+  const stat = fs.statSync(file);
+  return {
+    file,
+    note,
+    balance: getNoteBalance(note),
+    createdAt: stored.createdAt || null,
+    privacyReadyAt: stored.privacyReadyAt || stored.createdAt || null,
+    mtimeMs: stat.mtimeMs,
+  };
 }
 
 async function writeEncryptedNote(cfg, note, meta = {}) {
@@ -607,8 +622,9 @@ async function ensureNoteBalance(cfg, requiredUsdc, dryRun = false) {
     return { action: "skip_deposit", reason: "note_balance_sufficient", note: existing };
   }
   const depositAmount = selectDepositAmount(requiredUsdc - existingBalance);
+  const privacyReadyAt = notePrivacyReadyAt(cfg);
   if (dryRun) {
-    return { action: "would_deposit", depositAmount, existingBalance };
+    return { action: "would_deposit", depositAmount, existingBalance, privacyReadyAt };
   }
   assertBaseOnlyConfig();
   assertRemoteCircuitsAccepted(cfg);
@@ -620,11 +636,12 @@ async function ensureNoteBalance(cfg, requiredUsdc, dryRun = false) {
     source: "px402_deposit",
     depositAmountUsdc: depositAmount,
     previousNotePath: existing?.file || null,
+    privacyReadyAt,
   });
   return {
     action: "deposited",
     depositAmount,
-    note: { file: noteFile, note: merged, balance: getNoteBalance(merged) },
+    note: { file: noteFile, note: merged, balance: getNoteBalance(merged), privacyReadyAt },
   };
 }
 
@@ -718,6 +735,34 @@ function assertRemoteCircuitsAccepted(cfg) {
   }
 }
 
+function notePrivacyReadyAt(cfg) {
+  return new Date(Date.now() + cfg.minNoteAgeMinutes * 60_000).toISOString();
+}
+
+function assertNotePrivacyReady(cfg, latest) {
+  if (cfg.args.allowFreshNote || cfg.minNoteAgeMinutes <= 0) return;
+  const readyAtRaw = latest?.privacyReadyAt || latest?.createdAt;
+  const readyAtMs = readyAtRaw ? Date.parse(readyAtRaw) : latest?.mtimeMs;
+  if (!Number.isFinite(readyAtMs)) return;
+  if (Date.now() < readyAtMs) {
+    throw new Error(`Latest note is not privacy-ready until ${new Date(readyAtMs).toISOString()}. Waiting decouples deposit timing from provider payment. Use --allow-fresh-note only for unsafe demos.`);
+  }
+}
+
+function burnerFundingUsdc(cfg, priceUsdc) {
+  if (priceUsdc <= 0) return 0;
+  const bucket = Number(cfg.burnerFundingBucketUsdc || 0);
+  if (bucket <= 0) return priceUsdc;
+  if (bucket < priceUsdc) {
+    throw new Error(`BURNER_FUNDING_BUCKET_USD ${bucket} is below x402 price ${priceUsdc}.`);
+  }
+  return bucket;
+}
+
+function requiredFundingUsdc(cfg, priceUsdc) {
+  return burnerFundingUsdc(cfg, priceUsdc);
+}
+
 async function probePayment(input, init) {
   const first = await fetchJson(input, init);
   if (first.status !== 402) {
@@ -790,6 +835,7 @@ async function privateX402Call(cfg, provider, input, init = {}, dryRun = false) 
       provider,
       dryRun: true,
       priceUsdc: probe.accept.priceUsdc,
+      burnerFundUsdc: burnerFundingUsdc(cfg, probe.accept.priceUsdc),
       network: probe.accept.network,
       payTo: probe.accept.payTo,
       elapsedMs: Date.now() - callStart,
@@ -799,6 +845,7 @@ async function privateX402Call(cfg, provider, input, init = {}, dryRun = false) 
       dryRun: true,
       x402Version: probe.x402Version,
       priceUsdc: probe.accept.priceUsdc,
+      burnerFundUsdc: burnerFundingUsdc(cfg, probe.accept.priceUsdc),
       network: probe.accept.network,
       payTo: probe.accept.payTo,
       resource: probe.body.resource?.url || probe.accept.resource || String(input),
@@ -806,17 +853,20 @@ async function privateX402Call(cfg, provider, input, init = {}, dryRun = false) 
   }
 
   const latest = await timedStage(cfg, "read_latest_note", () => readLatestNote(cfg), { provider });
-  if (!latest || latest.balance < probe.accept.priceUsdc) {
+  const burnerFundUsdc = burnerFundingUsdc(cfg, probe.accept.priceUsdc);
+  if (!latest || latest.balance < burnerFundUsdc) {
     throw new Error(`Insufficient px402 note balance for ${provider}. Run prepare first.`);
   }
+  assertNotePrivacyReady(cfg, latest);
   assertRemoteCircuitsAccepted(cfg);
 
   const { PrivacySDK, getNoteBalance } = privacy();
   const sdk = new PrivacySDK({ chain: "base", rpcUrl: cfg.rpcUrl });
   sdk.setNote(latest.note);
-  const paymentResult = await timedStage(cfg, "private_note_make_payment", () => sdk.makePayment(latest.note, "", probe.accept.priceUsdc), {
+  const paymentResult = await timedStage(cfg, "private_note_make_payment", () => sdk.makePayment(latest.note, "", burnerFundUsdc), {
     provider,
     priceUsdc: probe.accept.priceUsdc,
+    burnerFundUsdc,
     sourceNotePath: relativeOrValue(latest.file),
     noteBalanceBeforeUsdc: latest.balance,
   });
@@ -827,11 +877,13 @@ async function privateX402Call(cfg, provider, input, init = {}, dryRun = false) 
     payer: burner.address,
     paymentTx: paymentResult.txHash,
     priceUsdc: probe.accept.priceUsdc,
+    burnerFundUsdc,
   });
   const validAfter = 0n;
   const validBefore = BigInt(Math.floor(Date.now() / 1000) + 3600);
   const nonce = `0x${crypto.randomBytes(32).toString("hex")}`;
   const amountMicro = probe.accept.amountMicro;
+  const burnerFundMicro = BigInt(Math.ceil(burnerFundUsdc * 1_000_000));
   const chainId = String(probe.accept.network).startsWith("eip155:")
     ? Number(String(probe.accept.network).split(":")[1])
     : 8453;
@@ -896,7 +948,9 @@ async function privateX402Call(cfg, provider, input, init = {}, dryRun = false) 
     burnerAddress: burner.address,
     paymentTx: paymentResult.txHash,
     intendedPayTo: probe.accept.payTo,
-    intendedAmountMicro: amountMicro.toString(),
+    intendedAmountMicro: burnerFundMicro.toString(),
+    providerAmountMicro: amountMicro.toString(),
+    burnerFundUsdc,
   }), { provider, payer: burner.address });
   appendRunLog(cfg, { event: "recovery_written", provider, recoveryPath: relativeOrValue(recoveryPath) });
 
@@ -913,7 +967,7 @@ async function privateX402Call(cfg, provider, input, init = {}, dryRun = false) 
   const responsePath = await timedStage(cfg, "write_response_body", async () => writeResponseBody(cfg, provider, paid.text), { provider });
   const updatedNote = sdk.getUpdatedNote();
   const updatedNotePath = updatedNote
-    ? await timedStage(cfg, "write_updated_note", () => writeEncryptedNote(cfg, updatedNote, { source: "private_x402_payment", provider, previousNotePath: latest.file }), { provider })
+    ? await timedStage(cfg, "write_updated_note", () => writeEncryptedNote(cfg, updatedNote, { source: "private_x402_payment", provider, previousNotePath: latest.file, privacyReadyAt: latest.privacyReadyAt || latest.createdAt || null }), { provider })
     : null;
   const receiptPayload = {
     provider,
@@ -926,6 +980,8 @@ async function privateX402Call(cfg, provider, input, init = {}, dryRun = false) 
     payTo: probe.accept.payTo,
     payer: burner.address,
     paymentTx: paymentResult.txHash,
+    burnerFundUsdc,
+    burnerRemainderUsdc: burnerFundUsdc - probe.accept.priceUsdc,
     xPaymentResponse: paid.response.headers.get("x-payment-response"),
     paymentResponse: paid.response.headers.get("payment-response"),
     requestHash: sha256(JSON.stringify({ input: String(input), init: { ...init, headers: init.headers || {} } })),
@@ -946,6 +1002,7 @@ async function privateX402Call(cfg, provider, input, init = {}, dryRun = false) 
     paid: true,
     status: paid.status,
     priceUsdc: probe.accept.priceUsdc,
+    burnerFundUsdc,
     receiptPath: relativeOrValue(receiptPath),
     responsePath: relativeOrValue(responsePath),
     updatedNotePath: relativeOrValue(updatedNotePath),
@@ -961,6 +1018,7 @@ async function privateX402Call(cfg, provider, input, init = {}, dryRun = false) 
     text: paid.text,
     paid: true,
     priceUsdc: probe.accept.priceUsdc,
+    burnerFundUsdc,
     receiptPath,
     updatedNotePath,
     responsePath,
@@ -1148,6 +1206,9 @@ async function commandDoctor(cfg) {
     maxUsdPerCall: cfg.maxUsdPerCall,
     monthlyBudgetUsd: cfg.monthlyBudgetUsd,
     monthlySpentUsd: monthlySpent(cfg),
+    minNoteAgeMinutes: cfg.minNoteAgeMinutes,
+    autoPrepareBeforePayment: cfg.autoPrepareBeforePayment,
+    burnerFundingBucketUsdc: cfg.burnerFundingBucketUsdc,
   });
 }
 
@@ -1172,7 +1233,9 @@ async function commandMarket(cfg, args) {
   if (providers.includes("exa")) assertProviderInvariant("exa", exaReq.input, exaReq.init);
   const cmcProbe = providers.includes("cmc") ? await probePayment(cmcReq.input, cmcReq.init) : null;
   const exaProbe = providers.includes("exa") ? await probePayment(exaReq.input, exaReq.init) : null;
-  const requiredUsdc = (cmcProbe?.accept?.priceUsdc || 0) + (exaProbe?.accept?.priceUsdc || 0) + 0.003;
+  const requiredUsdc = requiredFundingUsdc(cfg, cmcProbe?.accept?.priceUsdc || 0)
+    + requiredFundingUsdc(cfg, exaProbe?.accept?.priceUsdc || 0)
+    + 0.003;
   if (dryRun) {
     printJson({
       action: "market_dry_run",
@@ -1184,7 +1247,13 @@ async function commandMarket(cfg, args) {
     return;
   }
   await ensureDustEth(cfg, false);
-  await ensureNoteBalance(cfg, requiredUsdc, false);
+  const latest = await readLatestNote(cfg);
+  if (!latest || latest.balance < requiredUsdc) {
+    if (!(args.autoPrepare || cfg.autoPrepareBeforePayment)) {
+      throw new Error(`Insufficient privacy-ready note balance for market call. Run npm run privacy -- prepare first, wait until privacyReadyAt, then rerun market. Use --auto-prepare --allow-fresh-note only for unsafe demos.`);
+    }
+    await ensureNoteBalance(cfg, requiredUsdc, false);
+  }
   const cmc = providers.includes("cmc") ? await privateX402Call(cfg, "cmc", cmcReq.input, cmcReq.init, false) : { body: {} };
   if (providers.includes("cmc") && (cmc.status < 200 || cmc.status >= 300)) {
     throw new Error(`CMC private x402 call returned HTTP ${cmc.status}; see ${cmc.receiptPath}`);
@@ -1398,10 +1467,16 @@ async function commandRecoverSweep(cfg, args) {
 
 async function commandSmokeWeather(cfg, args) {
   const dryRun = Boolean(args.dryRun);
-  const requiredUsdc = 0.003;
+  const requiredUsdc = requiredFundingUsdc(cfg, 0.003);
   if (!dryRun) {
     await ensureDustEth(cfg, false);
-    await ensureNoteBalance(cfg, requiredUsdc, false);
+    const latest = await readLatestNote(cfg);
+    if (!latest || latest.balance < requiredUsdc) {
+      if (!(args.autoPrepare || cfg.autoPrepareBeforePayment)) {
+        throw new Error("Insufficient privacy-ready note balance for smoke:weather. Run prepare first and wait until privacyReadyAt, or use --auto-prepare --allow-fresh-note only for unsafe demos.");
+      }
+      await ensureNoteBalance(cfg, requiredUsdc, false);
+    }
   }
   const result = await privateX402Call(cfg, "weather", process.env.X402_WEATHER_URL || DEFAULT_WEATHER_URL, { method: "GET" }, dryRun);
   printJson({ action: "smoke_weather", dryRun, result });
@@ -1420,10 +1495,16 @@ async function commandNansen(cfg, args) {
   if (!selected) throw new Error(`Unknown Nansen dataset: ${dataset}. Use netflow, holdings, or perp-trades.`);
   appendRunLog(cfg, { event: "command_nansen_start", dataset, dryRun, provider: selected.provider });
   const probe = await timedStage(cfg, "nansen_initial_probe", () => probePayment(selected.request.input, selected.request.init), { dataset, provider: selected.provider });
-  const requiredUsdc = (probe?.accept?.priceUsdc || 0) + numberEnv("PAYMENT_NOTE_BUFFER_USD", 0.003);
+  const requiredUsdc = requiredFundingUsdc(cfg, probe?.accept?.priceUsdc || 0) + numberEnv("PAYMENT_NOTE_BUFFER_USD", 0.003);
   if (!dryRun) {
     await timedStage(cfg, "ensure_dust_eth", () => ensureDustEth(cfg, false), { dataset, provider: selected.provider });
-    await timedStage(cfg, "ensure_note_balance", () => ensureNoteBalance(cfg, requiredUsdc, false), { dataset, provider: selected.provider, requiredUsdc });
+    const latest = await timedStage(cfg, "read_latest_note", () => readLatestNote(cfg), { dataset, provider: selected.provider });
+    if (!latest || latest.balance < requiredUsdc) {
+      if (!(args.autoPrepare || cfg.autoPrepareBeforePayment)) {
+        throw new Error("Insufficient privacy-ready note balance for Nansen call. Run prepare first and wait until privacyReadyAt, or use --auto-prepare --allow-fresh-note only for unsafe demos.");
+      }
+      await timedStage(cfg, "ensure_note_balance", () => ensureNoteBalance(cfg, requiredUsdc, false), { dataset, provider: selected.provider, requiredUsdc });
+    }
   }
   const result = await privateX402Call(cfg, selected.provider, selected.request.input, selected.request.init, dryRun);
   printJson({

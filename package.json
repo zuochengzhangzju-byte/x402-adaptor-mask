@@ -1,6 +1,6 @@
 {
   "name": "x402-adaptor-mask",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Privacy-aware x402 payment adaptor demo for autonomous paid tool calls.",
   "license": "MIT",
   "private": false,

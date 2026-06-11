@@ -88,8 +88,19 @@ Real-spend demo, after funding the disposable wallet and setting the acknowledge
 
 ```bash
 npm run privacy -- prepare
+```
+
+Wait until the prepared note is privacy-ready. The default wait is `MIN_NOTE_AGE_MINUTES=60`; this
+decouples the public deposit from the later provider payment. Then run:
+
+```bash
 npm run demo:market -- --providers cmc,exa --symbol ETH --query "Ethereum market structure and Base ecosystem catalyst"
 ```
+
+The CLI intentionally refuses to auto-deposit immediately before a real paid call unless
+`--auto-prepare --allow-fresh-note` is used for an unsafe demo. For amount-correlation reduction,
+set `BURNER_FUNDING_BUCKET_USD=0.1` or another fixed bucket; this funds the burner with a normalized
+amount while the provider still receives the exact x402 price.
 
 Nansen-shaped research probe:
 
@@ -127,6 +138,8 @@ Not protected:
 - provider account metadata and any provider-side policy checks;
 - timing/amount correlation if a watcher already knows the hot wallet;
 - recovery sweeps broadcast from, or sent back to, the hot wallet;
+- immediate deposit-then-pay behavior in a low-activity privacy pool;
+- exact burner funding unless `BURNER_FUNDING_BUCKET_USD` is set;
 - production-grade ZK circuit integrity, because remote PRXVT circuits are not hash-pinned here.
 
 ## Never Publish
