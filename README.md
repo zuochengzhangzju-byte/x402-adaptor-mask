@@ -1,55 +1,139 @@
 # x402-adaptor-mask
 
-Public test package for an x402 privacy adaptor demo. The goal is to let a third-party agent inspect the open-source adaptor, run harmless probes, and attempt to infer whether paid Nansen-style purchases happened from public code plus a manually supplied hot wallet address.
+Open-source demo of a privacy-aware x402 payment adaptor for autonomous paid tool calls.
 
-This repository intentionally excludes live payment notes, recovery bundles, paid API responses, receipts, run logs, private `.env` files, and any real purchase transcript.
+The narrow product claim:
 
-## What is included
+```text
+agent -> privacy adaptor -> x402 paid market/search/tool API
+```
 
-- `bin/privacy-adapter.js` - CLI wrapper for x402 calls through a private-payment note flow.
-- `scripts/probe-x402-resource.mjs` - dry probe for x402 resources without paying.
-- `scripts/evaluate-paid-tool-module.mjs` - local evaluation harness for response/receipt folders you provide yourself.
+The adaptor helps a user run small paid research calls from a disposable Base wallet and encrypted
+px402 note, while keeping durable payment material, receipts, responses, and recovery files local.
+It is not a production privacy wallet and does not hide prompts, IP metadata, provider-side account
+metadata, or future trading activity.
+
+## What Is Included
+
+- `bin/privacy-adapter.js` - CLI wrapper for Base USDC x402 calls through a private-note flow.
+- `scripts/probe-x402-resource.mjs` - dry probe for public x402 resources without paying.
+- `scripts/evaluate-paid-tool-module.mjs` - local receipt/response evaluator for your own run data.
 - `assets/` - request bodies for public experiments, including Nansen Smart Money endpoint shapes.
-- `docs/THIRD_PARTY_ATTACK_TEST.md` - prompt and report format for an external red-team style test.
-- `px402-spike/package.json` - dependency island used by the adaptor runtime.
+- `docs/` - CLI, security review, adapter spec, red-team test, and evaluation notes.
+- `px402-spike/package.json` - isolated dependency bundle used by the adaptor runtime.
 
-## Setup
+This repository intentionally excludes live payment notes, recovery bundles, paid API responses,
+receipts, run logs, private `.env` files, and real purchase transcripts.
+
+## Install
 
 Install the runtime dependencies in the nested dependency folder:
 
 ```bash
-cd px402-spike
-npm install
-cd ..
+npm --prefix px402-spike install
 ```
 
-Create a local `.env` from `.env.example` and set only the values needed for the test you want to run. Do not commit `.env`.
+Root `package.json` intentionally has no runtime dependencies. The CLI imports the pinned spike
+dependency bundle through `createRequire`.
+
+## Quickstart
+
+Commands that do not need wallet config:
 
 ```bash
-cp .env.example .env
-npm run doctor
-```
-
-## Harmless probes
-
-Search or dry-probe public x402 listings:
-
-```bash
-npm run probe:x402 -- https://api.nansen.ai/api/v1/smart-money/netflow --method POST --body ./assets/nansen-smart-money-netflow-request.json
+npm run privacy -- help
+npm run privacy -- summarize
+npm run probe:x402 -- --url https://api.nansen.ai/api/v1/smart-money/netflow --method POST --body-file ./assets/nansen-smart-money-netflow-request.json
 npm run demo:nansen -- --dataset netflow --dry-run
 ```
 
-Basic public examples can be used for weather or BTC price style tests, but this repository is mainly structured around the privacy boundary: what an agent can infer without local receipts, responses, recovery material, or private notes.
+For wallet commands, use a fresh low-value Base wallet. Address-only funding is enough to receive
+USDC/ETH, but real x402 spend needs a local signer, so the CLI must be run with the disposable
+wallet private key available locally.
 
-## Payment safety
+Recommended local setup:
 
-Real payment requires an explicit local funding setup and a password-protected note. Keep these files private:
+```bash
+npm run privacy -- init
+```
 
-- `data/notes*`
-- `data/recovery*`
-- `data/receipts*`
-- `data/responses*`
-- `data/run-logs`
+`init` creates `.env`, generates a random `PX402_NOTE_PASSWORD`, and refuses to overwrite an
+existing `.env` unless `--force` is supplied. It does not print the generated password.
+
+Then fill only local secrets in `.env`:
+
+```env
+PRIVATE_KEY=your_disposable_low_value_base_wallet_private_key
+0X_API_KEY=optional_0x_dashboard_key
+ZEROX_API_KEY=optional_0x_dashboard_key
+```
+
+For hackathon-only real spend, you must also acknowledge the current PRXVT circuit limitation:
+
+```env
+PRXVT_REMOTE_CIRCUITS_ACK=I_UNDERSTAND_UNPINNED_REMOTE_CIRCUITS
+```
+
+That acknowledgement is not a production fix. See `docs/SECURITY_REVIEW.md`.
+
+## Wallet Commands
+
+```bash
+npm run doctor
+npm run privacy -- prepare --dry-run
+npm run demo:market -- --providers cmc,exa --symbol ETH --query "Ethereum market structure and Base ecosystem catalyst" --dry-run
+```
+
+Real-spend demo, after funding the disposable wallet and setting the acknowledgement:
+
+```bash
+npm run privacy -- prepare
+npm run demo:market -- --providers cmc,exa --symbol ETH --query "Ethereum market structure and Base ecosystem catalyst"
+```
+
+Nansen-shaped research probe:
+
+```bash
+npm run demo:nansen -- --dataset netflow --dry-run
+```
+
+If a private payment withdraws to a burner but the provider retry fails, encrypted recovery files
+can be listed and swept:
+
+```bash
+npm run privacy -- recover:list
+npm run privacy -- recover:sweep --file data/recovery/recovery-....json
+npm run privacy -- recover:sweep --file data/recovery/recovery-....json --execute
+```
+
+## Privacy Boundary
+
+Useful protection:
+
+- separates research-payment wallet/note from future trading wallets;
+- enforces Base USDC, provider allowlists, per-call caps, and monthly budget;
+- keeps notes and burner recovery material encrypted locally;
+- records receipts and response hashes for agent-side audit.
+
+Not protected:
+
+- prompts, request bodies, or endpoint paths from the paid provider;
+- IP/network metadata;
+- provider account metadata and any provider-side policy checks;
+- timing/amount correlation if a watcher already knows the hot wallet;
+- production-grade ZK circuit integrity, because remote PRXVT circuits are not hash-pinned here.
+
+## Never Publish
+
+Keep these local only:
+
 - `.env`
+- `data/notes`
+- `data/recovery`
+- `data/receipts`
+- `data/responses`
+- `data/run-logs`
+- `px402-spike/notes`
 
-For demos, prefer a fresh hot wallet with a small balance and a separate note password.
+Use `docs/THIRD_PARTY_ATTACK_TEST.md` before a public release: a public repo should reveal
+capabilities and possible endpoints, not live private paid results or note material.

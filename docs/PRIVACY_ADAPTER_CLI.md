@@ -22,13 +22,26 @@ This does not hide prompts, IP metadata, provider-side account metadata, or futu
 
 ## User Setup
 
-Create `hackathon/.env` from `.env.example`.
+Install dependencies first:
+
+```bash
+npm --prefix px402-spike install
+```
+
+Then create a local `.env`. Recommended:
+
+```bash
+npm run privacy -- init
+```
+
+`init` creates `.env`, generates a random `PX402_NOTE_PASSWORD`, and refuses to overwrite an
+existing `.env` unless `--force` is supplied. It does not print the generated password.
 
 Required:
 
 ```env
-PRIVATE_KEY=disposable_low_value_wallet_private_key
-PX402_NOTE_PASSWORD=local_note_password
+PRIVATE_KEY=<disposable_low_value_wallet_private_key>
+PX402_NOTE_PASSWORD=<local_note_password_generated_by_init>
 X402_CHAIN=base
 ```
 
@@ -44,7 +57,10 @@ PRXVT_REMOTE_CIRCUITS_ACK=I_UNDERSTAND_UNPINNED_REMOTE_CIRCUITS
 Leave it empty for no-spend review and dry-runs. This acknowledgement is not a production circuit
 integrity fix; see `SECURITY_REVIEW.md`.
 
-Recommended for one-command onboarding:
+`PRIVATE_KEY` must be a user-owned disposable low-value Base wallet. A wallet address alone can
+receive funds, but real x402 spend needs a local signer.
+
+Optional for one-command dust-ETH onboarding:
 
 ```env
 0X_API_KEY=your_0x_dashboard_key
@@ -64,6 +80,19 @@ The wallet should hold a small amount of Base USDC. If it has too little native 
 can use 0x Gasless to buy dust ETH with USDC.
 
 ## Commands
+
+```text
+npm run privacy -- help
+```
+
+Prints usage. Does not require wallet config.
+
+```text
+npm run privacy -- init [--allow-unpinned-circuits] [--force]
+```
+
+Creates a local `.env`. Does not require wallet config. If `PRIVATE_KEY` is present in the process
+environment, it writes it into `.env`; otherwise it leaves `PRIVATE_KEY=` blank for local editing.
 
 ```text
 npm run privacy -- doctor
@@ -122,6 +151,7 @@ npm run privacy -- summarize
 ```
 
 Rebuilds an agent-readable market signal from the latest saved paid responses. This does not spend.
+It does not require wallet config, but it needs local response files to produce a meaningful signal.
 
 ```text
 npm run privacy -- recover:list

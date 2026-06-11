@@ -93,9 +93,14 @@ x402 challenge resource before payment.
 Current allowlist:
 
 ```text
-cmc:     GET  https://pro-api.coinmarketcap.com/x402/v3/cryptocurrency/quotes/latest
-exa:     POST https://api.exa.ai/search
-weather: GET  https://httpay.xyz/api/weather
+cmc:                       GET  https://pro-api.coinmarketcap.com/x402/v3/cryptocurrency/quotes/latest
+exa:                       POST https://api.exa.ai/search
+weather:                   GET  https://httpay.xyz/api/weather
+nansen_netflow:            POST https://api.nansen.ai/api/v1/smart-money/netflow
+nansen_holdings:           POST https://api.nansen.ai/api/v1/smart-money/holdings
+nansen_perp_trades:        POST https://api.nansen.ai/api/v1/smart-money/perp-trades
+nansen_tgm_flow_intelligence:
+                           POST https://api.nansen.ai/api/v1/tgm/flow-intelligence
 ```
 
 ### Spike Scripts Bypass Main Adapter
@@ -129,6 +134,5 @@ No independent audit of PRXVT SDK public signal order.
 No prompt/IP privacy.
 No provider-side identity unlinkability.
 No merchant payTo pinning; provider payTo can rotate within an allowlisted resource.
-No packaged one-command installer yet.
+No packaged one-command installer yet; `npm --prefix px402-spike install` is still required.
 ```
-

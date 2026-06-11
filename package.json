@@ -1,5 +1,8 @@
 {
   "name": "x402-adaptor-mask",
+  "version": "0.1.0",
+  "description": "Privacy-aware x402 payment adaptor demo for autonomous paid tool calls.",
+  "license": "MIT",
   "private": false,
   "type": "module",
   "scripts": {
@@ -9,7 +12,7 @@
     "eval:paid-tools": "node ./scripts/evaluate-paid-tool-module.mjs",
     "probe:x402": "node ./scripts/probe-x402-resource.mjs",
     "doctor": "node ./bin/privacy-adapter.js doctor",
-    "prepare": "node ./bin/privacy-adapter.js prepare",
+    "privacy:prepare": "node ./bin/privacy-adapter.js prepare",
     "legacy:search:bazaar:weather": "node ./scripts/search-bazaar.mjs weather",
     "legacy:call:x402": "node ./scripts/call-x402-resource.cjs"
   },
