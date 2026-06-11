@@ -53,6 +53,7 @@ const NATIVE_ETH = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
 const ALLOWED_DEPOSITS = [0.01, 0.1, 1, 10, 100];
 const DEFAULT_NOTE_PASSWORD = "local-dev-password-change-me";
 const REMOTE_CIRCUITS_ACK = "I_UNDERSTAND_UNPINNED_REMOTE_CIRCUITS";
+const LINKING_SWEEP_WARNING = "hot-wallet broadcast or hot-wallet destination links the burner to the research wallet";
 const DEFAULT_CMC_URL = "https://pro-api.coinmarketcap.com/x402/v3/cryptocurrency/quotes/latest";
 const DEFAULT_EXA_URL = "https://api.exa.ai/search";
 const DEFAULT_WEATHER_URL = "https://httpay.xyz/api/weather?lat=22.3193&lon=114.1694";
@@ -467,6 +468,19 @@ function resolveRecoveryFile(cfg, requested) {
   }
   if (!fs.existsSync(resolved)) throw new Error(`Recovery file not found: ${resolved}`);
   return resolved;
+}
+
+function recoveryDestination(cfg, args) {
+  const raw = args.destination || process.env.RECOVERY_SWEEP_DESTINATION || "";
+  if (!raw) return null;
+  if (!viem().isAddress(raw)) {
+    throw new Error("--destination must be a valid EVM address.");
+  }
+  const destination = viem().getAddress(raw);
+  if (destination.toLowerCase() === cfg.account.address.toLowerCase() && !args.allowLinkingSweep) {
+    throw new Error("Refusing to recover directly to the configured hot wallet. This creates a public burner -> hot-wallet edge. Use an unlinkable destination/relayer, or pass --allow-linking-sweep for unsafe debugging only.");
+  }
+  return destination;
 }
 
 function mergeNotes(existing, deposited) {
@@ -1233,7 +1247,7 @@ async function commandRecoverSweep(cfg, args) {
   const file = resolveRecoveryFile(cfg, args.file);
   const recovery = decryptLocalSecret(cfg, file);
   const burner = accounts().privateKeyToAccount(recovery.burnerPrivateKey);
-  const destination = cfg.account.address;
+  const destination = recoveryDestination(cfg, args);
   const client = publicClient(cfg);
   const balance = await client.readContract({
     address: BASE_USDC,
@@ -1243,20 +1257,30 @@ async function commandRecoverSweep(cfg, args) {
   });
   const intended = BigInt(recovery.intendedAmountMicro || 0);
   const amount = balance < intended || intended === 0n ? balance : intended;
-  const dryRun = !args.execute;
+  const signOnly = Boolean(args.signOnly);
+  const dryRun = !args.execute && !signOnly;
   if (amount === 0n || dryRun) {
     printJson({
       action: "recover_sweep",
       dryRun,
+      signOnly,
       file,
       provider: recovery.provider,
       burnerAddress: burner.address,
       destination,
+      destinationRequiredForSignOnly: !destination,
       balanceUsdc: viem().formatUnits(balance, 6),
       sweepAmountUsdc: viem().formatUnits(amount, 6),
-      executable: amount > 0n,
+      executable: false,
+      signable: amount > 0n && Boolean(destination),
+      privacyMode: "default_no_broadcast",
+      warning: LINKING_SWEEP_WARNING,
+      recommendedNext: "Use --sign-only --destination <unlinkable_address>, then broadcast the authorization from an unlinkable relayer/gas wallet.",
     });
     return;
+  }
+  if (!destination) {
+    throw new Error("--destination is required for recovery. Do not recover to the configured hot wallet unless you explicitly accept the linkage risk.");
   }
 
   const validAfter = 0n;
@@ -1290,6 +1314,51 @@ async function commandRecoverSweep(cfg, args) {
     },
   });
   const parts = splitSignature(signature);
+  const authorization = {
+    token: BASE_USDC,
+    chainId: 8453,
+    from: burner.address,
+    to: destination,
+    value: amount.toString(),
+    valueUsdc: viem().formatUnits(amount, 6),
+    validAfter: validAfter.toString(),
+    validBefore: validBefore.toString(),
+    nonce,
+    signature,
+    v: parts.v,
+    r: parts.r,
+    s: parts.s,
+  };
+  if (signOnly) {
+    ensureDir(cfg.recoveryDir);
+    const authorizationPath = path.join(cfg.recoveryDir, `recovery-authorization-${Date.now()}.json`);
+    fs.writeFileSync(authorizationPath, JSON.stringify({
+      version: 1,
+      createdAt: new Date().toISOString(),
+      sourceRecoveryPath: file,
+      provider: recovery.provider,
+      privacyMode: "sign_only_no_hot_wallet_broadcast",
+      warning: LINKING_SWEEP_WARNING,
+      broadcastInstruction: "Submit transferWithAuthorization from an unlinkable relayer/gas wallet. Do not broadcast from the configured research hot wallet.",
+      authorization,
+    }, null, 2));
+    printJson({
+      action: "recover_sweep",
+      dryRun: false,
+      signOnly: true,
+      file,
+      provider: recovery.provider,
+      burnerAddress: burner.address,
+      destination,
+      amountUsdc: viem().formatUnits(amount, 6),
+      authorizationPath,
+      broadcastInstruction: "Use an unlinkable relayer/gas wallet. Broadcasting from the configured hot wallet defeats the recovery privacy boundary.",
+    });
+    return;
+  }
+  if (!args.allowLinkingSweep) {
+    throw new Error("Refusing to broadcast recovery from the configured hot wallet. This links tx.from hot wallet to the burner authorization. Use --sign-only with an unlinkable relayer, or pass --allow-linking-sweep for unsafe debugging only.");
+  }
   const hash = await walletClient(cfg).writeContract({
     address: BASE_USDC,
     abi: USDC_EIP3009_ABI,
@@ -1308,10 +1377,12 @@ async function commandRecoverSweep(cfg, args) {
     destination,
     amountUsdc: viem().formatUnits(amount, 6),
     transactionHash: hash,
+    privacyWarning: LINKING_SWEEP_WARNING,
   });
   printJson({
     action: "recover_sweep",
     dryRun: false,
+    unsafeLinkingSweep: true,
     status: receipt.status,
     file,
     provider: recovery.provider,
@@ -1320,6 +1391,7 @@ async function commandRecoverSweep(cfg, args) {
     amountUsdc: viem().formatUnits(amount, 6),
     transactionHash: hash,
     receiptPath,
+    warning: LINKING_SWEEP_WARNING,
   });
   scheduleForceExit();
 }
@@ -1418,7 +1490,8 @@ function usage() {
   npm run demo:market -- --symbol ETH --query "Ethereum market structure" [--dry-run]
   npm run privacy -- summarize [--cmc-response data/responses/response-...-cmc.json]
   npm run privacy -- recover:list
-  npm run privacy -- recover:sweep --file data/recovery/recovery-....json [--execute]
+  npm run privacy -- recover:sweep --file data/recovery/recovery-....json
+  npm run privacy -- recover:sweep --file data/recovery/recovery-....json --destination 0x... --sign-only
   npm run privacy -- smoke:weather [--dry-run]
   npm run privacy -- nansen [--dataset netflow|holdings|perp-trades] [--dry-run]
 `);

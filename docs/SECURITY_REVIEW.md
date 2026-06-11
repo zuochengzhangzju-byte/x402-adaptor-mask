@@ -126,6 +126,33 @@ npm run privacy -- prepare
 npm run demo:market -- --providers cmc,exa --symbol ETH --query "..."
 ```
 
+### Recovery Sweep Collapses The Anonymity Set
+
+Finding:
+
+```text
+The first public recovery design swept residual burner USDC back to cfg.account.address and
+broadcast the EIP-3009 transferWithAuthorization from cfg.account.
+That creates direct public graph edges:
+provider payment <- burner -> hot wallet
+and tx.from hot wallet -> burner authorization.
+```
+
+Mitigation:
+
+```text
+Fixed in bin/privacy-adapter.js.
+recover:sweep no longer defaults to the configured hot wallet as destination.
+recover:sweep without flags is dry-run only.
+recover:sweep --sign-only --destination <unlinkable_address> writes an authorization file and does
+not broadcast.
+recover:sweep --execute now refuses unless --allow-linking-sweep is explicitly passed.
+```
+
+Safe recovery requires broadcasting the signed authorization from an unlinkable relayer or gas
+wallet and sending funds to a destination that is not the configured research hot wallet. The
+adapter cannot make recovery private if the user chooses a linked destination or linked broadcaster.
+
 ## Remaining Production Gaps
 
 ```text
@@ -134,5 +161,6 @@ No independent audit of PRXVT SDK public signal order.
 No prompt/IP privacy.
 No provider-side identity unlinkability.
 No merchant payTo pinning; provider payTo can rotate within an allowlisted resource.
+Recovery privacy depends on an unlinkable relayer/gas wallet and unlinkable destination.
 No packaged one-command installer yet; `npm --prefix px402-spike install` is still required.
 ```

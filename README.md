@@ -98,13 +98,18 @@ npm run demo:nansen -- --dataset netflow --dry-run
 ```
 
 If a private payment withdraws to a burner but the provider retry fails, encrypted recovery files
-can be listed and swept:
+can be listed and inspected:
 
 ```bash
 npm run privacy -- recover:list
 npm run privacy -- recover:sweep --file data/recovery/recovery-....json
-npm run privacy -- recover:sweep --file data/recovery/recovery-....json --execute
+npm run privacy -- recover:sweep --file data/recovery/recovery-....json --destination 0x... --sign-only
 ```
+
+Recovery is sign-only by default. It writes an EIP-3009 authorization file under `data/recovery`
+and does not broadcast. Broadcast that authorization only from an unlinkable relayer or gas wallet.
+Do not sweep back to the configured hot wallet and do not broadcast from that hot wallet: either one
+creates an onchain burner-to-wallet link and defeats this privacy boundary.
 
 ## Privacy Boundary
 
@@ -121,6 +126,7 @@ Not protected:
 - IP/network metadata;
 - provider account metadata and any provider-side policy checks;
 - timing/amount correlation if a watcher already knows the hot wallet;
+- recovery sweeps broadcast from, or sent back to, the hot wallet;
 - production-grade ZK circuit integrity, because remote PRXVT circuits are not hash-pinned here.
 
 ## Never Publish

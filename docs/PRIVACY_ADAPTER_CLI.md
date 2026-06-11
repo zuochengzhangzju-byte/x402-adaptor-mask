@@ -156,12 +156,20 @@ It does not require wallet config, but it needs local response files to produce 
 ```text
 npm run privacy -- recover:list
 npm run privacy -- recover:sweep --file data/recovery/recovery-....json
-npm run privacy -- recover:sweep --file data/recovery/recovery-....json --execute
+npm run privacy -- recover:sweep --file data/recovery/recovery-....json --destination 0x... --sign-only
 ```
 
-Lists encrypted failure-recovery files, dry-runs a sweep, or executes a USDC recovery sweep from a
-failed burner wallet back to the disposable research wallet. The sweep uses EIP-3009, so the burner
-does not need ETH; the disposable wallet pays gas.
+Lists encrypted failure-recovery files, dry-runs recovery, or creates a signed EIP-3009 recovery
+authorization. The safe default does not broadcast from the disposable research wallet and does not
+send funds back to it.
+
+Use `--sign-only --destination <unlinkable_address>` to write an authorization file under
+`data/recovery`. Broadcast that authorization only from an unlinkable relayer or gas wallet. If the
+configured hot wallet broadcasts the transaction, `tx.from` links the hot wallet to the burner. If
+the destination is the hot wallet, the USDC transfer itself links the burner to the hot wallet.
+
+`--execute --allow-linking-sweep` exists only for unsafe local debugging and defeats the recovery
+privacy boundary.
 
 ```text
 npm run privacy -- smoke:weather --dry-run
@@ -218,8 +226,11 @@ only a failure-recovery path and should be treated as sensitive local data.
 - `doctor`, `prepare --dry-run`, and `market --dry-run` must not sign or spend.
 - `summarize` must not sign or spend.
 - `recover:sweep` without `--execute` must not sign or spend.
+- `recover:sweep --sign-only --destination ...` signs an EIP-3009 authorization but must not
+  broadcast.
 - Real-spend paths are `prepare`, `market`, and `smoke:weather` without `--dry-run`.
-- `recover:sweep --execute` signs a recovery authorization and spends small Base ETH gas from the
-  disposable wallet.
+- `recover:sweep --execute --allow-linking-sweep` is unsafe: it signs a recovery authorization,
+  broadcasts from the disposable wallet, and creates an onchain link between the hot wallet and the
+  burner.
 - Receipts should contain hashes and public payment metadata only.
 - Trading wallet keys are out of scope and must not be added to `.env`.
